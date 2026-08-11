@@ -79,19 +79,32 @@ def buscar_impressora(impressora_id: str):
         detail="Impressora não encontrada. Cadastre na planilha 'printer-config.xlsx' ou bipe o IP diretamente."
     )
 
-@app.get("/api/notas/{numero_nota}")
-def buscar_nota(numero_nota: str):
+@app.get("/api/busca/{termo}")
+def buscar_geral(termo: str):
     df = carregar_dados()
     if df is None:
         raise HTTPException(status_code=500, detail="Planilha de Notas não encontrada.")
     
-    itens_nota = df[df['Número do Documento Fiscal'].astype(str) == numero_nota]
+    termo_limpo = termo.strip().upper()
     
-    if itens_nota.empty:
-        raise HTTPException(status_code=404, detail="Nota não encontrada.")
+    # 1. Tenta buscar na coluna de Notas Fiscais
+    match_nota = df[df['Número do Documento Fiscal'].astype(str).str.strip().str.upper() == termo_limpo]
+    
+    # 2. Tenta buscar na coluna de Código do Item (P/N)
+    match_pn = df[df['Short Item No'].astype(str).str.strip().str.upper() == termo_limpo]
+    
+    # Avalia o que o sistema encontrou
+    if not match_nota.empty:
+        df_resultado = match_nota
+        tipo_busca = "NOTA"
+    elif not match_pn.empty:
+        df_resultado = match_pn
+        tipo_busca = "ITEM"
+    else:
+        raise HTTPException(status_code=404, detail="Nenhuma Nota ou P/N encontrado no Excel.")
     
     resultado = []
-    for _, row in itens_nota.iterrows():
+    for _, row in df_resultado.iterrows():
         endereco_fisico = str(row['Description Line 2']).strip() if row['Description Line 2'] else "N/A"
             
         resultado.append({
@@ -99,10 +112,11 @@ def buscar_nota(numero_nota: str):
             "descricao": str(row['Description ']).strip(),
             "qtdOriginal": int(row['Quantity Received']) if row['Quantity Received'] else 1,
             "volume": endereco_fisico,
-            "zpl": str(row['Formula'])
+            "zpl": str(row['Formula']),
+            "nota_origem": str(row['Número do Documento Fiscal']).strip() # Informação extra útil
         })
         
-    return {"nota": numero_nota, "itens": resultado}
+    return {"termo": termo_limpo, "tipo": tipo_busca, "itens": resultado}
 
 @app.post("/api/imprimir")
 def imprimir_etiqueta(req: ImprimirRequest):
