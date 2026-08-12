@@ -2141,3 +2141,25 @@ A distribuição, cópia, modificação ou disponibilização externa deve segui
 **Em uma frase:**
 
 > **KAD Mobile & MoviMeX é uma plataforma corporativa centralizada que transforma um único backend FastAPI em um gateway seguro entre usuários, dispositivos móveis e os principais serviços de infraestrutura e logística da empresa.**
+
+## 🧷Anexos
+
+Selecione a impressora desejada, no exemplo usaremos a 10.205.69.6
+
+<img width="477" height="800" alt="image" src="https://github.com/user-attachments/assets/6eb4a578-d118-4815-943b-e325ec8abd8b" />
+
+Selecione a NF, Part Number ou Código do Item. No nosso exemplo usamos a 1478650.
+
+<img width="481" height="796" alt="image" src="https://github.com/user-attachments/assets/910ba458-acf6-4a18-9663-f71d7796cf19" />
+
+Selecione o item desejado, no nosso exemplo usamos o GANCHO;3F6156.
+
+<img width="471" height="799" alt="image" src="https://github.com/user-attachments/assets/5e59408e-778f-423a-9a9e-26ecd77a97f0" />
+
+Selecione a quantidade de etiquetas.
+
+<img width="481" height="794" alt="image" src="https://github.com/user-attachments/assets/5fbcb5e4-a614-465a-a9dc-b88cf2d97d2e" />
+
+
+
+
