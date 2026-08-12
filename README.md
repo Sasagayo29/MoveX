@@ -1200,7 +1200,7 @@ A separação lógica deve seguir:
           ┌──────────┴──────────┐
           │                     │
           ▼                     ▼
-     /api/*                 /Movimex/*
+        /api/*               /Movimex/*
           │                     │
           ▼                     ▼
        FastAPI               MoviMeX
