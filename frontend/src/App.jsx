@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 
-const API_BASE_URL = 'http://localhost:8000/api';
+const API_BASE_URL = 'http://localhost:8001/api';
 
 function App() {
   const [telaAtual, setTelaAtual] = useState('busca_impressora');
@@ -255,6 +255,7 @@ function App() {
         </form>
       )}
 
+      {/* TELA 2: LISTAGEM DE ITENS */}
       {telaAtual === 'lista_itens' && (
         <div className="flex-1 flex flex-col overflow-hidden">
           <h2 className="text-xs font-bold border-b border-amber-400/20 pb-2 mb-3 text-slate-300 tracking-widest uppercase">
@@ -281,7 +282,15 @@ function App() {
                   className="w-full text-left bg-slate-900 p-4 border border-slate-700 active:bg-slate-800 focus:outline-none focus:border-amber-400 transition-colors shadow-sm"
                 >
                   <div className="flex justify-between items-start mb-2">
-                    <span className="font-mono font-bold text-amber-400 text-base">{item.codigo}</span>
+                    <div>
+                      <span className="font-mono font-bold text-amber-400 text-base">{item.codigo}</span>
+                      {/* EXIBIÇÃO DA COLUNA E AQUI */}
+                      {item.part_number && item.part_number !== item.codigo && (
+                        <span className="ml-2 bg-slate-800 text-slate-300 text-[10px] px-2 py-1 rounded-none border border-slate-700 font-mono tracking-wider">
+                          P/N: {item.part_number}
+                        </span>
+                      )}
+                    </div>
                     <span className="bg-slate-800 text-slate-300 text-[11px] px-2 py-1 rounded-none font-bold border border-slate-700 tracking-wider uppercase">
                       Qtd NFE: {item.qtdOriginal}
                     </span>
@@ -299,11 +308,20 @@ function App() {
         </div>
       )}
 
+      {/* TELA 3: PAINEL DE IMPRESSÃO */}
       {telaAtual === 'detalhes_item' && itemSelecionado && (
         <div className="flex-1 flex flex-col">
           <div className="bg-slate-900 p-5 border border-slate-700 mb-5 shadow-sm relative">
             <p className="text-[10px] uppercase text-slate-500 tracking-widest mb-1">Código SAP/SKU</p>
-            <p className="font-mono font-bold text-xl text-amber-400 mb-4">{itemSelecionado.codigo}</p>
+            <div className="flex items-baseline gap-3 mb-4">
+              <p className="font-mono font-bold text-xl text-amber-400">{itemSelecionado.codigo}</p>
+              {/* EXIBIÇÃO DA COLUNA E AQUI */}
+              {itemSelecionado.part_number && itemSelecionado.part_number !== itemSelecionado.codigo && (
+                <span className="bg-slate-800 text-slate-300 px-2 py-1 text-[10px] border border-slate-700 font-mono tracking-widest uppercase">
+                  P/N: {itemSelecionado.part_number}
+                </span>
+              )}
+            </div>
             
             <p className="text-[10px] uppercase text-slate-500 tracking-widest mb-1">Descrição do Material</p>
             <p className="font-bold text-sm text-white mb-4 leading-relaxed">{itemSelecionado.descricao}</p>
@@ -311,14 +329,12 @@ function App() {
             <p className="text-[10px] uppercase text-slate-500 tracking-widest mb-1">Alocação FÍSICA</p>
             <p className="font-bold text-sm text-slate-300">{itemSelecionado.volume}</p>
             
-            {/* Exibe a nota de origem caso a busca tenha sido feita direto pelo P/N */}
             {itemSelecionado.nota_origem && (
-               <div className="absolute top-4 right-4 bg-slate-800 border border-slate-700 px-2 py-1">
+               <div className="absolute top-4 right-4 bg-slate-800 border border-slate-700 px-2 py-1 shadow-sm">
                  <p className="text-[9px] text-slate-400 uppercase tracking-wider font-bold">Origem: {itemSelecionado.nota_origem}</p>
                </div>
             )}
           </div>
-
           <div className="mb-6">
             <label className="block text-center text-slate-400 font-bold uppercase tracking-widest mb-3 text-xs">
               Volume para Etiquetagem

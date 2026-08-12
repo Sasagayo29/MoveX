@@ -87,33 +87,68 @@ def buscar_geral(termo: str):
     
     termo_limpo = termo.strip().upper()
     
-    # 1. Tenta buscar na coluna de Notas Fiscais
-    match_nota = df[df['Número do Documento Fiscal'].astype(str).str.strip().str.upper() == termo_limpo]
+    # BLINDAGEM 1: Remove espaços em branco invisíveis de todos os cabeçalhos do Excel
+    df.columns = df.columns.str.strip()
     
-    # 2. Tenta buscar na coluna de Código do Item (P/N)
-    match_pn = df[df['Short Item No'].astype(str).str.strip().str.upper() == termo_limpo]
+    # BLINDAGEM 2: Busca garantida pela posição das colunas
+    # Coluna A (Índice 0) = Número da Nota | Coluna E (Índice 4) = Novo Part Number
+    match_nota = df[df.iloc[:, 0].astype(str).str.strip().str.upper() == termo_limpo]
+    match_pn = df[df.iloc[:, 4].astype(str).str.strip().str.upper() == termo_limpo]
     
-    # Avalia o que o sistema encontrou
-    if not match_nota.empty:
-        df_resultado = match_nota
-        tipo_busca = "NOTA"
-    elif not match_pn.empty:
-        df_resultado = match_pn
-        tipo_busca = "ITEM"
-    else:
+    # Mantém a busca no Short Item No caso ele ainda seja usado
+    match_short = pd.DataFrame()
+    if 'Short Item No' in df.columns:
+        match_short = df[df['Short Item No'].astype(str).str.strip().str.upper() == termo_limpo]
+
+    # Une tudo que encontrou
+    df_resultado = pd.concat([match_nota, match_pn, match_short]).drop_duplicates()
+    
+    if df_resultado.empty:
         raise HTTPException(status_code=404, detail="Nenhuma Nota ou P/N encontrado no Excel.")
+    
+    tipo_busca = "NOTA" if not match_nota.empty else "ITEM"
     
     resultado = []
     for _, row in df_resultado.iterrows():
-        endereco_fisico = str(row['Description Line 2']).strip() if row['Description Line 2'] else "N/A"
+        
+        # --- ALOCAÇÃO FÍSICA (Description Line 2) ---
+        endereco_fisico = "N/A"
+        if 'Description Line 2' in df.columns and pd.notna(row['Description Line 2']):
+            endereco_fisico = str(row['Description Line 2']).strip()
+        else:
+            # Fallback caso tenham mudado o nome levemente no Excel
+            for col in df.columns:
+                if 'LINE 2' in str(col).upper() and pd.notna(row[col]):
+                    endereco_fisico = str(row[col]).strip()
+                    break
+
+        # --- PART NUMBER (Coluna E - Índice 4) ---
+        part_number_col_e = str(row.iloc[4]).strip()
+        
+        # --- CÓDIGO PRINCIPAL ---
+        codigo_principal = str(row['Short Item No']).strip() if 'Short Item No' in df.columns else part_number_col_e
+        
+        # --- DESCRIÇÃO ---
+        descricao = "Sem Descrição"
+        if 'Description' in df.columns and pd.notna(row['Description']):
+            descricao = str(row['Description']).strip()
+            
+        # --- QUANTIDADE ---
+        qtd = 1
+        if 'Quantity Received' in df.columns and pd.notna(row['Quantity Received']):
+            qtd = int(row['Quantity Received'])
+            
+        # --- ZPL (Fórmula de Impressão) ---
+        zpl = str(row['Formula']).strip() if 'Formula' in df.columns and pd.notna(row['Formula']) else ""
             
         resultado.append({
-            "codigo": str(row['Short Item No']).strip(),
-            "descricao": str(row['Description ']).strip(),
-            "qtdOriginal": int(row['Quantity Received']) if row['Quantity Received'] else 1,
+            "codigo": codigo_principal,
+            "part_number": part_number_col_e,
+            "descricao": descricao,
+            "qtdOriginal": qtd,
             "volume": endereco_fisico,
-            "zpl": str(row['Formula']),
-            "nota_origem": str(row['Número do Documento Fiscal']).strip() # Informação extra útil
+            "zpl": zpl,
+            "nota_origem": str(row.iloc[0]).strip() 
         })
         
     return {"termo": termo_limpo, "tipo": tipo_busca, "itens": resultado}
