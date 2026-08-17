@@ -1200,7 +1200,7 @@ A separação lógica deve seguir:
           ┌──────────┴──────────┐
           │                     │
           ▼                     ▼
-     /api/*                 /Movimex/*
+        /api/*               /Movimex/*
           │                     │
           ▼                     ▼
        FastAPI               MoviMeX
@@ -2159,6 +2159,15 @@ Selecione o item desejado, no nosso exemplo usamos o GANCHO;3F6156.
 Selecione a quantidade de etiquetas.
 
 <img width="481" height="794" alt="image" src="https://github.com/user-attachments/assets/5fbcb5e4-a614-465a-a9dc-b88cf2d97d2e" />
+
+Pocket utilizado
+
+<img width="450" height="450" alt="image" src="https://github.com/user-attachments/assets/703fb867-62da-4a3f-a727-f581c919f7cd" />
+
+Impressora utilizada
+
+<img width="450" height="450" alt="image" src="https://github.com/user-attachments/assets/dc5a02af-216c-45f2-98fa-1278b33a3d7b" />
+
 
 
 
