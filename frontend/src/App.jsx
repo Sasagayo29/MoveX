@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { salvarSincronizacao, buscarOffline } from './db'; // Nosso banco offline
+import { salvarSincronizacao, buscarOffline } from './db'; 
 import { Html5QrcodeScanner } from 'html5-qrcode';
 
 const API_BASE_URL = '/api';
@@ -9,7 +9,7 @@ function App() {
   const [sincronizando, setSincronizando] = useState(false);
   
   const [impressoraID, setImpressoraID] = useState('');
-  const [impressoraAtual, setImpressoraAtual] = useState(null); 
+  const [impressoraAtual, setImpressoraAtual] = useState(null); // Agora guarda a conexão BT
   
   const [notaAtual, setNotaAtual] = useState('');
   const [itensDaNota, setItensDaNota] = useState([]);
@@ -17,9 +17,9 @@ function App() {
   const [quantidadeEditada, setQuantidadeEditada] = useState('');
   
   const [buscaPN, setBuscaPN] = useState('');
-  const [mensagem, setMensagem] = useState('Bipe a impressora ou faça a Sincronização.');
+  const [mensagem, setMensagem] = useState('Conecte a impressora ou Sincronize.');
   const [cameraAtiva, setCameraAtiva] = useState(false);
-  const [alvoCamera, setAlvoCamera] = useState(''); // 'impressora' ou 'nota'
+  const [alvoCamera, setAlvoCamera] = useState(''); 
   
   const inputRef = useRef(null);
 
@@ -49,28 +49,57 @@ function App() {
     }
   };
 
-  // --- BUSCA OFFLINE: IMPRESSORA ---
+  // --- CONEXÃO NATIVA BLUETOOTH (NA PRIMEIRA TELA) ---
+  const conectarBluetooth = async () => {
+    try {
+      setMensagem('Procurando dispositivos Bluetooth...');
+      
+      const device = await navigator.bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: ['38eb4a80-c570-11e3-9507-0002a5d5c51b'] // Serviço ZPL da Zebra
+      });
+
+      setMensagem('Pareando...');
+      const server = await device.gatt.connect();
+      const service = await server.getPrimaryService('38eb4a80-c570-11e3-9507-0002a5d5c51b');
+      const characteristic = await service.getCharacteristic('38eb4a82-c570-11e3-9507-0002a5d5c51b');
+
+      // Guarda o objeto de conexão para usarmos na última tela!
+      setImpressoraAtual({
+        id: device.name || 'ZEBRA-BT',
+        tipo: 'BLUETOOTH',
+        device: device,
+        characteristic: characteristic
+      });
+
+      setMensagem(`Conectado à ${device.name || 'Zebra Bluetooth'}.`);
+      setTelaAtual('busca_nota');
+
+    } catch (error) {
+      console.error(error);
+      setMensagem('ERRO: Falha ao conectar Bluetooth ou cancelado.');
+    }
+  };
+
+  // --- BUSCA OFFLINE: IMPRESSORA (FALLBACK WI-FI/REDE) ---
   const buscarImpressoraAction = async (termoDeBusca) => {
     const buscaLimpa = termoDeBusca.trim().toUpperCase(); 
     if (!buscaLimpa) return;
 
-    setMensagem('Buscando offline...');
-    
-    // Tenta buscar no banco local primeiro
+    setMensagem('Buscando na rede...');
     const resultados = await buscarOffline('impressoras', buscaLimpa);
     
     if (resultados.length > 0) {
-      setImpressoraAtual(resultados[0]);
-      setMensagem(`Impressora ${resultados[0].id} pronta.`);
+      setImpressoraAtual({ ...resultados[0], tipo: 'WIFI' });
+      setMensagem(`Impressora ${resultados[0].id} pronta (Rede).`);
       setTelaAtual('busca_nota');
     } else {
-      // Fallback para IP direto caso não esteja no banco
       if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(buscaLimpa)) {
-        setImpressoraAtual({ id: `PRN-${buscaLimpa}`, ip: buscaLimpa });
-        setMensagem('IP de Impressora configurado manualmente.');
+        setImpressoraAtual({ id: `PRN-${buscaLimpa}`, ip: buscaLimpa, tipo: 'WIFI' });
+        setMensagem('IP configurado manualmente (Rede).');
         setTelaAtual('busca_nota');
       } else {
-        setMensagem('IMPRESSORA NÃO ENCONTRADA. Sincronize o app.');
+        setMensagem('NÃO ENCONTRADA. Sincronize ou use Bluetooth.');
         setImpressoraID('');
       }
     }
@@ -103,7 +132,6 @@ function App() {
     }
   };
 
-  // --- CONTROLES DE INTERFACE ---
   const selecionarItem = (item) => {
     setItemSelecionado(item);
     setQuantidadeEditada(item.qtdOriginal.toString()); 
@@ -122,66 +150,86 @@ function App() {
     setQuantidadeEditada(valorSomenteNumeros);
   };
 
-  // --- IMPRESSÃO BLUETOOTH NATIVA (SEM SERVIDOR) ---
-  const handleImprimirBluetooth = async (tipo) => {
+  // --- IMPRESSÃO FINAL (BLUETOOTH OU WIFI) ---
+  const handleImprimir = async (tipo) => {
     if (!quantidadeEditada || quantidadeEditada === '0') {
       setMensagem('ERRO: Quantidade inválida.');
       return;
     }
     
-    setMensagem(`Aguardando conexão com a Zebra...`);
+    setMensagem('Enviando impressão...');
     
-    try {
-      // Formatação ZPL
-      const zplOriginal = itemSelecionado.zpl.replace('¨', '');
-      const qtdPrint = tipo === 'individual' ? 1 : parseInt(quantidadeEditada, 10);
-      const zplPronto = /\^PQ\d+/.test(zplOriginal) 
-          ? zplOriginal.replace(/\^PQ\d+/, `^PQ${qtdPrint}`) 
-          : zplOriginal.replace('^XZ', `^PQ${qtdPrint}^XZ`);
+    // Formatação ZPL
+    const zplOriginal = itemSelecionado.zpl.replace('¨', '');
+    const qtdPrint = tipo === 'individual' ? 1 : parseInt(quantidadeEditada, 10);
+    const zplPronto = /\^PQ\d+/.test(zplOriginal) 
+        ? zplOriginal.replace(/\^PQ\d+/, `^PQ${qtdPrint}`) 
+        : zplOriginal.replace('^XZ', `^PQ${qtdPrint}^XZ`);
 
-      // API Nativa do Navegador (Web Bluetooth)
-      // O UUID genérico da Zebra é '38eb4a80-c570-11e3-9507-0002a5d5c51b'
-      const device = await navigator.bluetooth.requestDevice({
-        acceptAllDevices: true,
-        optionalServices: ['38eb4a80-c570-11e3-9507-0002a5d5c51b']
-      });
+    // SE A IMPRESSORA ESTIVER VIA BLUETOOTH
+    if (impressoraAtual.tipo === 'BLUETOOTH') {
+      try {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(zplPronto);
+        const chunkSize = 512; 
 
-      const server = await device.gatt.connect();
-      const service = await server.getPrimaryService('38eb4a80-c570-11e3-9507-0002a5d5c51b');
-      const characteristic = await service.getCharacteristic('38eb4a82-c570-11e3-9507-0002a5d5c51b');
+        for (let i = 0; i < data.length; i += chunkSize) {
+          const chunk = data.slice(i, i + chunkSize);
+          await impressoraAtual.characteristic.writeValue(chunk);
+        }
 
-      // Transformar o texto ZPL em Bytes e enviar em pedaços (Chunking obrigatório para BLE)
-      const encoder = new TextEncoder();
-      const data = encoder.encode(zplPronto);
-      const chunkSize = 512; // ZQ521 aguenta blocos de 512 bytes
-
-      for (let i = 0; i < data.length; i += chunkSize) {
-        const chunk = data.slice(i, i + chunkSize);
-        await characteristic.writeValue(chunk);
+        setMensagem('Sucesso! Etiqueta impressa (Bluetooth).');
+        setTelaAtual('busca_nota');
+        setNotaAtual('');
+        setItemSelecionado(null);
+      } catch (error) {
+        console.error(error);
+        setMensagem('ERRO: Conexão Bluetooth perdida. Refaça a conexão.');
+        // Se perder a conexão, força o operador a conectar de novo
+        setTelaAtual('busca_impressora');
       }
+    } 
+    // SE FOR IMPRESSORA DE REDE (FALLBACK DO SERVIDOR)
+    else {
+      try {
+        const response = await fetch(`${API_BASE_URL}/imprimir`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            impressora_ip: impressoraAtual.ip, 
+            codigo_item: itemSelecionado.codigo,
+            nota: notaAtual.toUpperCase(),
+            quantidade: parseInt(quantidadeEditada, 10),
+            zpl_formula: itemSelecionado.zpl,
+            tipo: tipo
+          })
+        });
 
-      setMensagem('Sucesso! Etiqueta enviada via Bluetooth.');
-      
-      // Desconecta para economizar bateria do coletor
-      device.gatt.disconnect();
-      
-      setTelaAtual('busca_nota');
-      setNotaAtual('');
-      setItemSelecionado(null);
-      
-    } catch (error) {
-      console.error(error);
-      setMensagem(`ERRO BT: Cancele e tente novamente.`);
+        if (response.ok) {
+          setMensagem('Sucesso! Etiqueta gerada (Rede).');
+          setTelaAtual('busca_nota');
+          setNotaAtual('');
+          setItemSelecionado(null);
+        } else {
+          setMensagem('ERRO: Impressora offline (Rede).');
+        }
+      } catch (error) {
+        setMensagem('ERRO DE REDE AO IMPRIMIR.');
+      }
     }
   };
 
   // --- NAVEGAÇÃO ---
   const handleVoltar = () => {
     if (telaAtual === 'busca_nota') {
+      // Se tiver Bluetooth conectado, desconecta para limpar a memória
+      if (impressoraAtual?.device?.gatt?.connected) {
+        impressoraAtual.device.gatt.disconnect();
+      }
       setTelaAtual('busca_impressora');
       setImpressoraAtual(null);
       setImpressoraID('');
-      setMensagem('Bipe a impressora ou faça Sincronização.');
+      setMensagem('Conecte a impressora ou Sincronize.');
     }
     else if (telaAtual === 'lista_itens') {
       setTelaAtual('busca_nota');
@@ -213,7 +261,7 @@ function App() {
       const scanner = new Html5QrcodeScanner("reader", { 
         fps: 10, 
         qrbox: { width: 250, height: 250 },
-        supportedScanTypes: [0] // Prioriza a câmera traseira
+        supportedScanTypes: [0] 
       });
       
       scanner.render((textoLido) => {
@@ -226,9 +274,7 @@ function App() {
           setNotaAtual(textoLido);
           buscarNotaItemAction(textoLido);
         }
-      }, (error) => {
-        // Ignora erros de frame vazio
-      });
+      }, (error) => {});
 
       return () => {
         scanner.clear().catch(e => console.log(e));
@@ -248,7 +294,6 @@ function App() {
   return (
     <div className="h-screen w-screen bg-slate-950 font-sans flex flex-col text-slate-100 overflow-hidden relative">
       
-      {/* HEADER COMPACTO COM BOTÃO DE SINCRONIZAÇÃO */}
       <header className="bg-slate-900 border-b-2 border-amber-400/30 p-2 flex items-center justify-between h-14 shrink-0 shadow-lg relative">
         {telaAtual !== 'busca_impressora' ? (
            <button onClick={handleVoltar} className="p-2 flex items-center text-amber-400 active:bg-slate-800 rounded">
@@ -269,7 +314,6 @@ function App() {
           )}
         </div>
 
-        {/* BOTÃO DE SINCRONIZAÇÃO OFFLINE */}
         <button 
           onClick={handleSincronizar} 
           disabled={sincronizando}
@@ -282,14 +326,12 @@ function App() {
         </button>
       </header>
 
-      {/* BARRA DE STATUS */}
       <div className="h-8 flex items-center justify-center border-l-4 border-amber-500 bg-slate-900 px-2 shrink-0">
         <p className="font-bold text-amber-400 text-center uppercase text-[10px] tracking-widest truncate">
           {mensagem}
         </p>
       </div>
 
-      {/* MODAL DA CÂMERA */}
       {cameraAtiva && (
         <div className="absolute inset-0 z-50 bg-slate-950 flex flex-col pt-10">
           <div className="flex justify-between items-center px-4 mb-4">
@@ -302,15 +344,28 @@ function App() {
         </div>
       )}
 
-      {/* ÁREA CENTRAL FLEXÍVEL */}
       <main className="flex-1 p-2 flex flex-col overflow-y-auto relative">
         
         {telaAtual === 'busca_impressora' && (
           <div className="flex-1 flex flex-col justify-center max-w-sm mx-auto w-full">
-            <label className="text-amber-400 font-bold uppercase tracking-wider mb-2 text-xs text-center">
-              Vincular Impressora
-            </label>
-            <div className="relative">
+            
+            {/* BOTÃO NATIVO BLUETOOTH */}
+            <button 
+              onClick={conectarBluetooth} 
+              className="mb-8 bg-[#24527a] border-2 border-blue-400 text-white p-5 font-extrabold uppercase active:bg-[#1a3d5c] shadow-lg flex items-center justify-center gap-3 w-full"
+            >
+              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+              Parear Impressora via Bluetooth
+            </button>
+
+            <div className="flex items-center my-4">
+              <div className="flex-grow border-t border-slate-700"></div>
+              <span className="px-3 text-slate-500 text-xs uppercase font-bold">Ou via Rede</span>
+              <div className="flex-grow border-t border-slate-700"></div>
+            </div>
+
+            {/* FALLBACK WI-FI / CÂMERA */}
+            <div className="relative mt-2">
               <input 
                 ref={inputRef}
                 type="text"
@@ -319,8 +374,8 @@ function App() {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') { e.preventDefault(); buscarImpressoraAction(impressoraID); }
                 }}
-                placeholder="NOME, IP OU BIPE"
-                className="w-full p-4 pr-12 text-xl text-center bg-slate-800 border-2 border-amber-400 rounded-none focus:outline-none text-white uppercase"
+                placeholder="IP OU NOME (REDE)"
+                className="w-full p-4 pr-12 text-lg text-center bg-slate-800 border border-slate-600 rounded-none focus:outline-none text-slate-300 uppercase"
               />
               <button 
                 type="button" 
@@ -330,8 +385,8 @@ function App() {
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
               </button>
             </div>
-            <button onClick={() => buscarImpressoraAction(impressoraID)} className="mt-4 bg-slate-800 border border-amber-400/50 text-amber-400 p-3 font-bold uppercase active:bg-slate-700">
-              Conectar
+            <button onClick={() => buscarImpressoraAction(impressoraID)} className="mt-2 bg-slate-800 text-slate-400 p-3 font-bold uppercase active:bg-slate-700 text-xs">
+              Conectar via Wi-Fi
             </button>
           </div>
         )}
@@ -362,7 +417,7 @@ function App() {
               </button>
             </div>
             <button onClick={() => buscarNotaItemAction(notaAtual)} className="mt-4 bg-slate-800 border border-amber-400/50 text-amber-400 p-3 font-bold uppercase active:bg-slate-700">
-              Consultar Offline
+              Consultar Memória Local
             </button>
           </div>
         )}
@@ -412,7 +467,6 @@ function App() {
         {telaAtual === 'detalhes_item' && itemSelecionado && (
           <div className="flex-1 flex flex-col justify-center max-w-sm mx-auto w-full">
             
-            {/* Card de Detalhes Super Compacto */}
             <div className="bg-slate-900 p-3 border border-slate-700 mb-3 relative shrink-0">
               <p className="font-mono font-bold text-lg text-amber-400 leading-none mb-1">{itemSelecionado.codigo}</p>
               {itemSelecionado.part_number && itemSelecionado.part_number !== itemSelecionado.codigo && (
@@ -427,7 +481,6 @@ function App() {
               </div>
             </div>
 
-            {/* Controle numérico compacto */}
             <div className="mb-4 shrink-0">
               <div className="flex items-center justify-center gap-2">
                 <button 
@@ -454,22 +507,20 @@ function App() {
               </div>
             </div>
 
-            {/* Botões de Impressão Bluetooth */}
             <div className="flex flex-col gap-2 shrink-0">
               <button 
                 type="button"
-                onClick={() => handleImprimirBluetooth('individual')}
-                className="bg-[#24527a] text-white py-3 font-extrabold active:bg-[#1a3d5c] text-xs uppercase shadow-md flex items-center justify-center gap-2"
+                onClick={() => handleImprimir('individual')}
+                className="bg-amber-500 text-slate-950 py-3 font-extrabold active:bg-amber-600 text-xs uppercase"
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                Imprimir Bluetooth (Individual)
+                Imprimir Individual
               </button>
               <button 
                 type="button"
-                onClick={() => handleImprimirBluetooth('montante')}
-                className="bg-slate-800 text-blue-400 border border-blue-400/50 py-3 font-extrabold active:bg-slate-700 text-xs uppercase flex items-center justify-center gap-2"
+                onClick={() => handleImprimir('montante')}
+                className="bg-slate-800 text-amber-400 border border-amber-400/50 py-3 font-extrabold active:bg-slate-700 text-xs uppercase"
               >
-                Imprimir Bluetooth (Montante)
+                Imprimir Montante
               </button>
             </div>
             
