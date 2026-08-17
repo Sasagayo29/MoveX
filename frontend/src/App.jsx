@@ -9,7 +9,7 @@ function App() {
   const [sincronizando, setSincronizando] = useState(false);
   
   const [impressoraID, setImpressoraID] = useState('');
-  const [impressoraAtual, setImpressoraAtual] = useState(null); // Agora guarda a conexão BT
+  const [impressoraAtual, setImpressoraAtual] = useState(null); 
   
   const [notaAtual, setNotaAtual] = useState('');
   const [itensDaNota, setItensDaNota] = useState([]);
@@ -17,7 +17,7 @@ function App() {
   const [quantidadeEditada, setQuantidadeEditada] = useState('');
   
   const [buscaPN, setBuscaPN] = useState('');
-  const [mensagem, setMensagem] = useState('Conecte a impressora ou Sincronize.');
+  const [mensagem, setMensagem] = useState('Bipe o IP ou Nome da Impressora.');
   const [cameraAtiva, setCameraAtiva] = useState(false);
   const [alvoCamera, setAlvoCamera] = useState(''); 
   
@@ -49,14 +49,15 @@ function App() {
     }
   };
 
-  // --- CONEXÃO NATIVA BLUETOOTH (NA PRIMEIRA TELA) ---
+  // --- CONEXÃO NATIVA BLUETOOTH COM FILTRO DE SERVIÇO ZEBRA (ZERO LAG) ---
   const conectarBluetooth = async () => {
     try {
-      setMensagem('Procurando dispositivos Bluetooth...');
+      setMensagem('Procurando impressoras Zebra...');
       
+      // O FILTRO SUPREMO: Busca apenas dispositivos que emitam o serviço oficial ZPL.
+      // Isso elimina as Smart TVs, fones de ouvido e acaba com o travamento no Android.
       const device = await navigator.bluetooth.requestDevice({
-        acceptAllDevices: true,
-        optionalServices: ['38eb4a80-c570-11e3-9507-0002a5d5c51b'] // Serviço ZPL da Zebra
+        filters: [{ services: ['38eb4a80-c570-11e3-9507-0002a5d5c51b'] }]
       });
 
       setMensagem('Pareando...');
@@ -64,7 +65,6 @@ function App() {
       const service = await server.getPrimaryService('38eb4a80-c570-11e3-9507-0002a5d5c51b');
       const characteristic = await service.getCharacteristic('38eb4a82-c570-11e3-9507-0002a5d5c51b');
 
-      // Guarda o objeto de conexão para usarmos na última tela!
       setImpressoraAtual({
         id: device.name || 'ZEBRA-BT',
         tipo: 'BLUETOOTH',
@@ -72,36 +72,39 @@ function App() {
         characteristic: characteristic
       });
 
-      setMensagem(`Conectado à ${device.name || 'Zebra Bluetooth'}.`);
+      setMensagem(`Conectado via Bluetooth: ${device.name}.`);
       setTelaAtual('busca_nota');
 
     } catch (error) {
       console.error(error);
-      setMensagem('ERRO: Falha ao conectar Bluetooth ou cancelado.');
+      setMensagem('Operação Bluetooth cancelada ou falhou.');
     }
   };
 
-  // --- BUSCA OFFLINE: IMPRESSORA (FALLBACK WI-FI/REDE) ---
-  const buscarImpressoraAction = async (termoDeBusca) => {
+  // --- BUSCA OFFLINE: IMPRESSORA (EXCLUSIVO PARA REDE/WIFI) ---
+  const buscarImpressoraWIFI = async (termoDeBusca) => {
     const buscaLimpa = termoDeBusca.trim().toUpperCase(); 
     if (!buscaLimpa) return;
 
-    setMensagem('Buscando na rede...');
+    // 1. É UM IP? (Conexão Direta)
+    if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(buscaLimpa)) {
+      setImpressoraAtual({ id: `PRN-${buscaLimpa}`, ip: buscaLimpa, tipo: 'WIFI' });
+      setMensagem('IP configurado manualmente (Rede).');
+      setTelaAtual('busca_nota');
+      return;
+    }
+
+    // 2. É UM NOME (ex: PTU-PRN-LABEL-MOVEL-04)?
+    setMensagem('Consultando banco offline...');
     const resultados = await buscarOffline('impressoras', buscaLimpa);
     
     if (resultados.length > 0) {
       setImpressoraAtual({ ...resultados[0], tipo: 'WIFI' });
-      setMensagem(`Impressora ${resultados[0].id} pronta (Rede).`);
+      setMensagem(`Impressora ${resultados[0].id} pronta (Wi-Fi).`);
       setTelaAtual('busca_nota');
     } else {
-      if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(buscaLimpa)) {
-        setImpressoraAtual({ id: `PRN-${buscaLimpa}`, ip: buscaLimpa, tipo: 'WIFI' });
-        setMensagem('IP configurado manualmente (Rede).');
-        setTelaAtual('busca_nota');
-      } else {
-        setMensagem('NÃO ENCONTRADA. Sincronize ou use Bluetooth.');
-        setImpressoraID('');
-      }
+      setMensagem('NOME NÃO ENCONTRADO NA MEMÓRIA.');
+      setImpressoraID('');
     }
   };
 
@@ -159,14 +162,12 @@ function App() {
     
     setMensagem('Enviando impressão...');
     
-    // Formatação ZPL
     const zplOriginal = itemSelecionado.zpl.replace('¨', '');
     const qtdPrint = tipo === 'individual' ? 1 : parseInt(quantidadeEditada, 10);
     const zplPronto = /\^PQ\d+/.test(zplOriginal) 
         ? zplOriginal.replace(/\^PQ\d+/, `^PQ${qtdPrint}`) 
         : zplOriginal.replace('^XZ', `^PQ${qtdPrint}^XZ`);
 
-    // SE A IMPRESSORA ESTIVER VIA BLUETOOTH
     if (impressoraAtual.tipo === 'BLUETOOTH') {
       try {
         const encoder = new TextEncoder();
@@ -185,11 +186,9 @@ function App() {
       } catch (error) {
         console.error(error);
         setMensagem('ERRO: Conexão Bluetooth perdida. Refaça a conexão.');
-        // Se perder a conexão, força o operador a conectar de novo
         setTelaAtual('busca_impressora');
       }
     } 
-    // SE FOR IMPRESSORA DE REDE (FALLBACK DO SERVIDOR)
     else {
       try {
         const response = await fetch(`${API_BASE_URL}/imprimir`, {
@@ -222,14 +221,13 @@ function App() {
   // --- NAVEGAÇÃO ---
   const handleVoltar = () => {
     if (telaAtual === 'busca_nota') {
-      // Se tiver Bluetooth conectado, desconecta para limpar a memória
       if (impressoraAtual?.device?.gatt?.connected) {
         impressoraAtual.device.gatt.disconnect();
       }
       setTelaAtual('busca_impressora');
       setImpressoraAtual(null);
       setImpressoraID('');
-      setMensagem('Conecte a impressora ou Sincronize.');
+      setMensagem('Selecione o modo de conexão.');
     }
     else if (telaAtual === 'lista_itens') {
       setTelaAtual('busca_nota');
@@ -269,7 +267,7 @@ function App() {
         setCameraAtiva(false);
         if (alvoCamera === 'impressora') {
           setImpressoraID(textoLido);
-          buscarImpressoraAction(textoLido);
+          buscarImpressoraWIFI(textoLido);
         } else {
           setNotaAtual(textoLido);
           buscarNotaItemAction(textoLido);
@@ -344,50 +342,61 @@ function App() {
         </div>
       )}
 
-      <main className="flex-1 p-2 flex flex-col overflow-y-auto relative">
+      <main className="flex-1 p-3 flex flex-col overflow-y-auto relative">
         
         {telaAtual === 'busca_impressora' && (
-          <div className="flex-1 flex flex-col justify-center max-w-sm mx-auto w-full">
+          <div className="flex-1 flex flex-col justify-center max-w-sm mx-auto w-full gap-5">
             
-            {/* BOTÃO NATIVO BLUETOOTH */}
+            <div className="text-center mb-2">
+              <label className="text-amber-400 font-bold uppercase tracking-wider text-xs">
+                Vincular Impressora
+              </label>
+            </div>
+
+            {/* NOVO BOTÃO BLUETOOTH ELEGANTE */}
             <button 
               onClick={conectarBluetooth} 
-              className="mb-8 bg-[#24527a] border-2 border-blue-400 text-white p-5 font-extrabold uppercase active:bg-[#1a3d5c] shadow-lg flex items-center justify-center gap-3 w-full"
+              className="bg-slate-800 border border-blue-500/50 text-blue-400 p-4 rounded-lg flex items-center justify-between active:bg-slate-700 transition-colors shadow-sm"
             >
-              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-              Parear Impressora via Bluetooth
+              <div className="flex items-center gap-3">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                <span className="font-bold uppercase tracking-wider text-sm">Parear Bluetooth</span>
+              </div>
+              <span className="text-[9px] text-slate-500 uppercase tracking-widest border border-slate-600 px-2 py-1 rounded">Rápido</span>
             </button>
 
-            <div className="flex items-center my-4">
-              <div className="flex-grow border-t border-slate-700"></div>
-              <span className="px-3 text-slate-500 text-xs uppercase font-bold">Ou via Rede</span>
-              <div className="flex-grow border-t border-slate-700"></div>
+            <div className="flex items-center">
+              <div className="flex-grow border-t border-slate-800"></div>
+              <span className="px-3 text-slate-600 text-[10px] uppercase font-bold tracking-widest">Ou via Rede / Wi-Fi</span>
+              <div className="flex-grow border-t border-slate-800"></div>
             </div>
 
-            {/* FALLBACK WI-FI / CÂMERA */}
-            <div className="relative mt-2">
-              <input 
-                ref={inputRef}
-                type="text"
-                value={impressoraID}
-                onChange={(e) => setImpressoraID(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') { e.preventDefault(); buscarImpressoraAction(impressoraID); }
-                }}
-                placeholder="IP OU NOME (REDE)"
-                className="w-full p-4 pr-12 text-lg text-center bg-slate-800 border border-slate-600 rounded-none focus:outline-none text-slate-300 uppercase"
-              />
-              <button 
-                type="button" 
-                onClick={() => abrirCamera('impressora')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 p-2"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+            {/* CARD WI-FI / CÂMERA LIMPO */}
+            <div className="bg-slate-900 border border-slate-800 p-3 rounded-lg shadow-inner">
+              <div className="relative mb-3">
+                <input 
+                  ref={inputRef}
+                  type="text"
+                  value={impressoraID}
+                  onChange={(e) => setImpressoraID(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); buscarImpressoraWIFI(impressoraID); }
+                  }}
+                  placeholder="IP OU NOME DA PLANILHA"
+                  className="w-full p-3 pr-12 text-sm bg-slate-950 border border-slate-700 rounded focus:outline-none focus:border-amber-400 text-white uppercase placeholder:text-slate-600"
+                />
+                <button 
+                  type="button" 
+                  onClick={() => abrirCamera('impressora')}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 text-slate-400 p-2 active:text-amber-400"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                </button>
+              </div>
+              <button onClick={() => buscarImpressoraWIFI(impressoraID)} className="w-full bg-slate-800 text-slate-300 border border-slate-700 p-3 font-bold uppercase active:bg-slate-700 text-xs tracking-wider rounded">
+                Conectar na Rede
               </button>
             </div>
-            <button onClick={() => buscarImpressoraAction(impressoraID)} className="mt-2 bg-slate-800 text-slate-400 p-3 font-bold uppercase active:bg-slate-700 text-xs">
-              Conectar via Wi-Fi
-            </button>
           </div>
         )}
 
@@ -406,7 +415,7 @@ function App() {
                   if (e.key === 'Enter') { e.preventDefault(); buscarNotaItemAction(notaAtual); }
                 }}
                 placeholder="EX: 158602"
-                className="w-full p-4 pr-12 text-xl text-center bg-slate-800 border-2 border-amber-400 rounded-none focus:outline-none text-white uppercase"
+                className="w-full p-4 pr-12 text-xl text-center bg-slate-800 border-2 border-amber-400 rounded-lg shadow-inner focus:outline-none text-white uppercase"
               />
               <button 
                 type="button" 
@@ -416,7 +425,7 @@ function App() {
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
               </button>
             </div>
-            <button onClick={() => buscarNotaItemAction(notaAtual)} className="mt-4 bg-slate-800 border border-amber-400/50 text-amber-400 p-3 font-bold uppercase active:bg-slate-700">
+            <button onClick={() => buscarNotaItemAction(notaAtual)} className="mt-4 bg-slate-800 border border-amber-400/50 text-amber-400 p-3 font-bold uppercase active:bg-slate-700 rounded">
               Consultar Memória Local
             </button>
           </div>
@@ -430,7 +439,7 @@ function App() {
                 value={buscaPN}
                 onChange={(e) => setBuscaPN(e.target.value)}
                 placeholder="PESQUISAR NESTA LISTA..."
-                className="w-full p-2 text-sm bg-slate-800 border border-slate-600 focus:border-amber-400 text-white uppercase focus:outline-none"
+                className="w-full p-2 text-sm bg-slate-800 border border-slate-600 focus:border-amber-400 text-white uppercase focus:outline-none rounded"
               />
             </div>
             
@@ -440,7 +449,7 @@ function App() {
                   <button
                     key={`${item.codigo}-${index}`} 
                     onClick={() => selecionarItem(item)}
-                    className="w-full text-left bg-slate-900 p-3 border border-slate-700 active:bg-slate-800 focus:outline-none"
+                    className="w-full text-left bg-slate-900 p-3 border border-slate-700 active:bg-slate-800 focus:outline-none rounded"
                   >
                     <div className="flex justify-between items-center mb-1">
                       <div className="flex flex-col">
@@ -449,7 +458,7 @@ function App() {
                            <span className="text-slate-400 text-[9px] font-mono mt-1">P/N: {item.part_number}</span>
                          )}
                       </div>
-                      <span className="bg-slate-800 text-slate-300 text-[10px] px-2 py-1 font-bold border border-slate-700">
+                      <span className="bg-slate-800 text-slate-300 text-[10px] px-2 py-1 font-bold border border-slate-700 rounded">
                         QTD: {item.qtdOriginal}
                       </span>
                     </div>
@@ -467,7 +476,7 @@ function App() {
         {telaAtual === 'detalhes_item' && itemSelecionado && (
           <div className="flex-1 flex flex-col justify-center max-w-sm mx-auto w-full">
             
-            <div className="bg-slate-900 p-3 border border-slate-700 mb-3 relative shrink-0">
+            <div className="bg-slate-900 p-3 border border-slate-700 mb-3 relative shrink-0 rounded">
               <p className="font-mono font-bold text-lg text-amber-400 leading-none mb-1">{itemSelecionado.codigo}</p>
               {itemSelecionado.part_number && itemSelecionado.part_number !== itemSelecionado.codigo && (
                 <p className="text-slate-400 text-[10px] font-mono leading-none mb-2">P/N: {itemSelecionado.part_number}</p>
@@ -486,7 +495,7 @@ function App() {
                 <button 
                   type="button"
                   onClick={() => handleAlterarQuantidade(-1)}
-                  className="bg-slate-800 border border-slate-600 text-amber-400 w-12 h-12 text-xl font-black active:bg-slate-700"
+                  className="bg-slate-800 border border-slate-600 text-amber-400 w-12 h-12 text-xl font-black active:bg-slate-700 rounded"
                 >
                   -
                 </button>
@@ -495,12 +504,12 @@ function App() {
                   inputMode="numeric"
                   value={quantidadeEditada}
                   onChange={handleDigitarQtd}
-                  className="w-20 h-12 text-xl text-center bg-slate-950 border-2 border-amber-400 text-white font-bold focus:outline-none"
+                  className="w-20 h-12 text-xl text-center bg-slate-950 border-2 border-amber-400 text-white font-bold focus:outline-none rounded"
                 />
                 <button 
                   type="button"
                   onClick={() => handleAlterarQuantidade(1)}
-                  className="bg-slate-800 border border-slate-600 text-amber-400 w-12 h-12 text-xl font-black active:bg-slate-700"
+                  className="bg-slate-800 border border-slate-600 text-amber-400 w-12 h-12 text-xl font-black active:bg-slate-700 rounded"
                 >
                   +
                 </button>
@@ -511,16 +520,17 @@ function App() {
               <button 
                 type="button"
                 onClick={() => handleImprimir('individual')}
-                className="bg-amber-500 text-slate-950 py-3 font-extrabold active:bg-amber-600 text-xs uppercase"
+                className="bg-[#24527a] text-white py-3 font-extrabold active:bg-[#1a3d5c] text-xs uppercase shadow-md flex items-center justify-center gap-2 rounded"
               >
-                Imprimir Individual
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                Imprimir Bluetooth (Individual)
               </button>
               <button 
                 type="button"
                 onClick={() => handleImprimir('montante')}
-                className="bg-slate-800 text-amber-400 border border-amber-400/50 py-3 font-extrabold active:bg-slate-700 text-xs uppercase"
+                className="bg-slate-800 text-blue-400 border border-blue-400/50 py-3 font-extrabold active:bg-slate-700 text-xs uppercase flex items-center justify-center gap-2 rounded"
               >
-                Imprimir Montante
+                Imprimir Bluetooth (Montante)
               </button>
             </div>
             
