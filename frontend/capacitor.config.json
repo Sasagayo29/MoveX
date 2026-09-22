@@ -1,0 +1,13 @@
+{
+  "appId": "com.kinross.movimex",
+  "appName": "MoviMeX",
+  "webDir": "movimex-dist",
+  "server": {
+    "cleartext": true
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
+}

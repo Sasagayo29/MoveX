@@ -1,7 +1,7 @@
 // src/db.js
 
 const DB_NAME = 'MovimexOfflineDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // <--- MUDE PARA 2 PARA FORÇAR A CRIAÇÃO DA TABELA
 
 // Inicializa o banco de dados IndexedDB
 export const initDB = () => {
@@ -11,14 +11,15 @@ export const initDB = () => {
     request.onupgradeneeded = (event) => {
       const db = event.target.result;
       
-      // Tabela de Itens/Notas
       if (!db.objectStoreNames.contains('itens')) {
         db.createObjectStore('itens', { keyPath: 'id', autoIncrement: true });
       }
-      
-      // Tabela de Impressoras
       if (!db.objectStoreNames.contains('impressoras')) {
         db.createObjectStore('impressoras', { keyPath: 'id' });
+      }
+      // --- NOVO: TABELA DO F41 ---
+      if (!db.objectStoreNames.contains('itens_f41')) {
+        db.createObjectStore('itens_f41', { keyPath: 'id', autoIncrement: true });
       }
     };
 
